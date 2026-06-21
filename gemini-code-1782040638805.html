@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>スマホ対戦ボウリング</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #222;
+            color: #fff;
+            font-family: sans-serif;
+            overflow: hidden; /* スクロール防止 */
+        }
+        #ui {
+            padding: 10px;
+            display: flex;
+            justify-content: space-around;
+            font-size: 1.2rem;
+            background-color: #111;
+        }
+        .active {
+            color: #ffd700;
+            font-weight: bold;
+            text-decoration: underline;
+        }
+        canvas {
+            background-color: #deb887; /* レーンの木の板の色 */
+            display: block;
+            margin: 0 auto;
+            touch-action: none; /* スワイプ時のブラウザ動作を無効化 */
+        }
+        #message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 2rem;
+            color: red;
+            font-weight: bold;
+            pointer-events: none;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui">
+        <div id="p1-score" class="active">Player 1: 0</div>
+        <div id="p2-score">Player 2: 0</div>
+    </div>
+    <div id="message">Strike!</div>
+    <canvas id="gameCanvas"></canvas>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const p1ScoreEl = document.getElementById('p1-score');
+        const p2ScoreEl = document.getElementById('p2-score');
+        const messageEl = document.getElementById('message');
+
+        // スマホ画面サイズに合わせる
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight - 50;
+
+        let currentPlayer = 1;
+        let scores = { 1: 0, 2: 0 };
+        let isRolling = false;
+        let turnEnded = false;
+
+        // ボールの設定
+        const ball = {
+            x: canvas.width / 2,
+            y: canvas.height - 80,
+            radius: 20,
+            vx: 0,
+            vy: 0,
+            color: '#333'
+        };
+
+        // ピンの設定
+        let pins = [];
+        const pinRadius = 12;
+        
+        function setupPins() {
+            pins = [];
+            const startX = canvas.width / 2;
+            const startY = 100;
+            const spacingX = 30;
+            const spacingY = 25;
+
+            // 10本のピンを三角形に配置
+            let pinCount = 0;
+            for (let row = 0; row < 4; row++) {
+                for (let col = 0; col <= row; col++) {
+                    pins.push({
+                        x: startX - (row * spacingX / 2) + (col * spacingX),
+                        y: startY + (row * spacingY),
+                        active: true // 倒れたらfalseになる
+                    });
+                }
+            }
+        }
+
+        // 描画処理
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // ガター（溝）の描画
+            ctx.fillStyle = '#444';
+            ctx.fillRect(0, 0, 30, canvas.height);
+            ctx.fillRect(canvas.width - 30, 0, 30, canvas.height);
+
+            // ピンの描画
+            pins.forEach(pin => {
+                if (pin.active) {
+                    ctx.beginPath();
+                    ctx.arc(pin.x, pin.y, pinRadius, 0, Math.PI * 2);
+                    ctx.fillStyle = '#fff';
+                    ctx.fill();
+                    ctx.strokeStyle = '#f00';
+                    ctx.lineWidth = 4;
+                    ctx.stroke();
+                }
+            });
+
+            // ボールの描画
+            ctx.beginPath();
+            ctx.arc(ball.x, ball.y, ball.radius, 0, Math.PI * 2);
+            ctx.fillStyle = ball.color;
+            ctx.fill();
+        }
+
+        // 物理演算と状態更新
+        function update() {
+            if (isRolling) {
+                ball.x += ball.vx;
+                ball.y += ball.vy;
+
+                // 摩擦による減速
+                ball.vx *= 0.98;
+                ball.vy *= 0.98;
+
+                // 壁（ガター）との当たり判定
+                if (ball.x - ball.radius < 30 || ball.x + ball.radius > canvas.width - 30) {
+                    ball.vx *= -0.5; // 少し反発して落ちるイメージ
+                }
+
+                // ピンとの当たり判定
+                let hitCount = 0;
+                pins.forEach(pin => {
+                    if (pin.active) {
+                        const dx = ball.x - pin.x;
+                        const dy = ball.y - pin.y;
+                        const distance = Math.sqrt(dx * dx + dy * dy);
+
+                        if (distance < ball.radius + pinRadius) {
+                            pin.active = false; // ピンを倒す
+                            ball.vx *= 0.9; // ボールの勢いが少し減る
+                            ball.vy *= 0.9;
+                        }
+                    }
+                });
+
+                // ボールが止まった（または画面外に出た）かの判定
+                if (Math.abs(ball.vx) < 0.1 && Math.abs(ball.vy) < 0.1 && !turnEnded) {
+                    turnEnded = true;
+                    setTimeout(endTurn, 1000); // 1秒後にターン終了処理
+                } else if (ball.y < -50 && !turnEnded) {
+                    turnEnded = true;
+                    setTimeout(endTurn, 1000);
+                }
+            }
+        }
+
+        // ターン終了時の処理
+        function endTurn() {
+            // 倒れたピンの数をカウント
+            let knockedDown = pins.filter(p => !p.active).length;
+            scores[currentPlayer] += knockedDown;
+
+            if (currentPlayer === 1) {
+                p1ScoreEl.innerText = `Player 1: ${scores[1]}`;
+                currentPlayer = 2;
+                p1ScoreEl.classList.remove('active');
+                p2ScoreEl.classList.add('active');
+            } else {
+                p2ScoreEl.innerText = `Player 2: ${scores[2]}`;
+                currentPlayer = 1;
+                p2ScoreEl.classList.remove('active');
+                p1ScoreEl.classList.add('active');
+            }
+
+            resetBall();
+        }
+
+        function resetBall() {
+            ball.x = canvas.width / 2;
+            ball.y = canvas.height - 80;
+            ball.vx = 0;
+            ball.vy = 0;
+            isRolling = false;
+            turnEnded = false;
+            setupPins(); // ピンを元に戻す
+        }
+
+        // ゲームループ
+        function loop() {
+            update();
+            draw();
+            requestAnimationFrame(loop);
+        }
+
+        // 操作処理（スマホのスワイプ、PCのマウスドラッグ）
+        let startY, startX, startTime;
+
+        canvas.addEventListener('touchstart', (e) => {
+            if (isRolling) return;
+            startX = e.touches[0].clientX;
+            startY = e.touches[0].clientY;
+            startTime = Date.now();
+        });
+
+        canvas.addEventListener('touchend', (e) => {
+            if (isRolling) return;
+            const endX = e.changedTouches[0].clientX;
+            const endY = e.changedTouches[0].clientY;
+            const endTime = Date.now();
+
+            const timeDiff = endTime - startTime;
+            const dy = endY - startY;
+            const dx = endX - startX;
+
+            // 上に向かってフリックした場合のみ投げる
+            if (dy < -20 && timeDiff < 1000) {
+                ball.vx = (dx / timeDiff) * 5; // 横のブレ
+                ball.vy = (dy / timeDiff) * 15; // 縦の勢い
+                isRolling = true;
+            }
+        });
+
+        // 初期化して開始
+        setupPins();
+        loop();
+
+    </script>
+</body>
+</html>
